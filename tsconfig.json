@@ -1,0 +1,17 @@
+{
+    "compilerOptions": {
+        "incremental": true,
+        "tsBuildInfoFile": "./build/build-info.tsbuildinfo",
+        "target": "es2022",
+        "module": "es2022",
+        "outDir": "./build",
+        "removeComments": true,
+        "forceConsistentCasingInFileNames": true,
+        "strict": true,
+        "types": ["@webgpu/types"],
+        "skipLibCheck": true,
+        "rootDir": "./src"
+
+    },
+    "include": ["src/**/*"]
+}

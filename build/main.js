@@ -25,11 +25,11 @@ async function main() {
         usage: GPUTextureUsage.RENDER_ATTACHMENT
     });
     const shaderModule = device.createShaderModule({
-        label: "sdf shader module",
-        code: await (await fetch("src/shaders/sdf.wgsl", { cache: "no-store" })).text()
+        label: "ray march shader module",
+        code: await (await fetch("src/shaders/ray-march.wgsl", { cache: "no-store" })).text()
     });
     const renderPipeline = device.createRenderPipeline({
-        label: "sdf render pipeline",
+        label: "ray march render pipeline",
         layout: "auto",
         vertex: {
             module: shaderModule,
@@ -37,7 +37,7 @@ async function main() {
         },
         fragment: {
             module: shaderModule,
-            entryPoint: "sdf_frag",
+            entryPoint: "ray_march_frag",
             targets: [{ format: preferredFormat }]
         },
         primitive: {
@@ -45,17 +45,17 @@ async function main() {
         }
     });
     const renderPassDescriptor = {
-        label: "sdf render pass",
+        label: "ray march render pass",
         colorAttachments: [{
                 clearValue: [1, 1, 1, 1],
                 loadOp: "clear",
                 storeOp: "store",
                 view: null
-            }],
+            }]
     };
     const render = () => {
         renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
-        const encoder = device.createCommandEncoder({ label: "sdf render encoder" });
+        const encoder = device.createCommandEncoder({ label: "ray march render encoder" });
         const pass = encoder.beginRenderPass(renderPassDescriptor);
         pass.setPipeline(renderPipeline);
         pass.draw(6);

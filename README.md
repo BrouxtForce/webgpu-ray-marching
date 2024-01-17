@@ -1,2 +1,3 @@
-# webgpu-sdf
- SDFs in WebGPU
+# webgpu-ray-marching
+
+Ray Marching in WebGPU

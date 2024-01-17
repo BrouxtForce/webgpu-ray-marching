@@ -1,5 +1,15 @@
 // Reference: https://michaelwalczyk.com/blog-ray-marching.html
 
+struct CameraData {
+    position: vec3f,
+    aspect: f32,
+    tanFov2: f32,
+
+    rotation: mat3x3f,
+};
+
+@group(0) @binding(0) var<uniform> cameraData: CameraData;
+
 struct VertexData {
     @builtin(position) position: vec4f,
     @location(0) texcoord: vec2f,
@@ -20,7 +30,7 @@ fn quad_vert(@builtin(vertex_index) vertexId: u32) -> VertexData {
 
     var pos: vec2f = positions[vertexId];
     out.position = vec4f(pos, 0, 1);
-    out.texcoord = pos;
+    out.texcoord = pos * vec2f(cameraData.aspect, 1) * cameraData.tanFov2;
 
     return out;
 }
@@ -39,8 +49,8 @@ fn ray_march_frag(in: VertexData) -> @location(0) vec4f {
     const MIN_HIT_DISTANCE: f32 = 0.001;
     const MAX_TRACE_DISTANCE: f32 = 1000;
 
-    var rayOrigin = vec3f(0, 0, -2);
-    var rayDirection = normalize(vec3f(in.texcoord, 1));
+    var rayOrigin = cameraData.position;
+    var rayDirection = normalize(cameraData.rotation * vec3f(in.texcoord, 1));
 
     var currentPosition = rayOrigin;
     var distanceTraveled: f32 = 0;

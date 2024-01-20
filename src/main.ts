@@ -1,9 +1,18 @@
 import Input from "./input.js";
+import DebugTable from "./debug-table.js"
 import { identityMatrix, matrixMult, matrixRotationX, matrixRotationY, normalize, vectorMatrixMult } from "./math.js";
 
 async function main() {
     const adapter = await navigator.gpu?.requestAdapter();
-    const device = await adapter?.requestDevice();
+
+    const requiredFeatures: GPUFeatureName[] = [];
+
+    const supportsTimestampQuery = Boolean(adapter?.features.has("timestamp-query"));
+    if (supportsTimestampQuery) {
+        requiredFeatures.push("timestamp-query");
+    }
+
+    const device = await adapter?.requestDevice({ requiredFeatures });
 
     if (!device) {
         alert("Your browser does not support WebGPU.");
@@ -74,6 +83,7 @@ async function main() {
         ]
     });
 
+    
     const renderPassDescriptor: GPURenderPassDescriptor = {
         label: "ray march render pass",
         colorAttachments: [{
@@ -83,6 +93,27 @@ async function main() {
             view: null as any
         }]
     };
+    
+    const querySetCapacity = 2;
+    let querySet: GPUQuerySet;
+    let queryBuffer: GPUBuffer;
+    
+    if (supportsTimestampQuery) {
+        querySet = device.createQuerySet({
+            type: "timestamp",
+            count: querySetCapacity
+        });
+        queryBuffer = device.createBuffer({
+            size: BigInt64Array.BYTES_PER_ELEMENT * querySetCapacity,
+            usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC
+        });
+
+        renderPassDescriptor.timestampWrites = {
+            querySet: querySet,
+            beginningOfPassWriteIndex: 0,
+            endOfPassWriteIndex: 1
+        };
+    }
 
     const input = new Input(canvas);
 
@@ -95,7 +126,14 @@ async function main() {
         cameraAspect.set([canvas.width / canvas.height]);
     });
 
+    const debugTableNode = document.querySelector(".debug-table") as HTMLDivElement;
+    const debugTable = new DebugTable(debugTableNode);
+
+    let frameTimeMs = 0;
+    let gpuTimeMs = 0;
     const loop = () => {
+        const frameStart = performance.now();
+
         const movementSpeed = 0.05;
         const movement = input.movement();
 
@@ -117,9 +155,12 @@ async function main() {
 
         input.endFrame();
 
+        debugTable.set("CPU", `${frameTimeMs.toFixed(2)}ms`);
+        debugTable.set("GPU", `${gpuTimeMs.toFixed(2)}ms`);
+
         device.queue.writeBuffer(cameraDataBuffer, 0, cameraData);
 
-        // @ts-ignore pls
+        // @ts-expect-error pls
         renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
 
         const encoder = device.createCommandEncoder({ label: "ray march render encoder" });
@@ -130,9 +171,30 @@ async function main() {
         pass.draw(6);
         pass.end();
 
+        let queryResultBuffer: GPUBuffer;
+        
+        if (supportsTimestampQuery) {
+            queryResultBuffer = device.createBuffer({
+                size: queryBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+            });
+            encoder.resolveQuerySet(querySet, 0, querySetCapacity, queryBuffer, 0);
+            encoder.copyBufferToBuffer(queryBuffer, 0, queryResultBuffer, 0, queryBuffer.size);
+        }
+
         device.queue.submit([encoder.finish()]);
 
+        if (supportsTimestampQuery) {
+            // @ts-expect-error bruh queryResultBuffer is defined
+            queryResultBuffer.mapAsync(GPUMapMode.READ).then(() => {
+                const times = new BigInt64Array(queryResultBuffer.getMappedRange());
+                gpuTimeMs = Number(BigInt(times[1]) - BigInt(times[0])) / 1_000_000;
+            });
+        }
+
         window.requestAnimationFrame(loop);
+
+        frameTimeMs = performance.now() - frameStart;
     };
 
     window.requestAnimationFrame(loop);

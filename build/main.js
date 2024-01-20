@@ -1,8 +1,14 @@
 import Input from "./input.js";
+import DebugTable from "./debug-table.js";
 import { identityMatrix, matrixMult, matrixRotationX, matrixRotationY, normalize, vectorMatrixMult } from "./math.js";
 async function main() {
     const adapter = await navigator.gpu?.requestAdapter();
-    const device = await adapter?.requestDevice();
+    const requiredFeatures = [];
+    const supportsTimestampQuery = Boolean(adapter?.features.has("timestamp-query"));
+    if (supportsTimestampQuery) {
+        requiredFeatures.push("timestamp-query");
+    }
+    const device = await adapter?.requestDevice({ requiredFeatures });
     if (!device) {
         alert("Your browser does not support WebGPU.");
         return;
@@ -70,6 +76,24 @@ async function main() {
                 view: null
             }]
     };
+    const querySetCapacity = 2;
+    let querySet;
+    let queryBuffer;
+    if (supportsTimestampQuery) {
+        querySet = device.createQuerySet({
+            type: "timestamp",
+            count: querySetCapacity
+        });
+        queryBuffer = device.createBuffer({
+            size: BigInt64Array.BYTES_PER_ELEMENT * querySetCapacity,
+            usage: GPUBufferUsage.QUERY_RESOLVE | GPUBufferUsage.COPY_SRC
+        });
+        renderPassDescriptor.timestampWrites = {
+            querySet: querySet,
+            beginningOfPassWriteIndex: 0,
+            endOfPassWriteIndex: 1
+        };
+    }
     const input = new Input(canvas);
     let rotationX = 0;
     let rotationY = 0;
@@ -78,7 +102,12 @@ async function main() {
         canvas.height = canvas.clientHeight;
         cameraAspect.set([canvas.width / canvas.height]);
     });
+    const debugTableNode = document.querySelector(".debug-table");
+    const debugTable = new DebugTable(debugTableNode);
+    let frameTimeMs = 0;
+    let gpuTimeMs = 0;
     const loop = () => {
+        const frameStart = performance.now();
         const movementSpeed = 0.05;
         const movement = input.movement();
         const rotation = matrixMult(matrixRotationY(rotationY), matrixRotationX(rotationX));
@@ -94,6 +123,8 @@ async function main() {
         }
         matrixMult(matrixRotationX(rotationX), matrixRotationY(rotationY), cameraRotation);
         input.endFrame();
+        debugTable.set("CPU", `${frameTimeMs.toFixed(2)}ms`);
+        debugTable.set("GPU", `${gpuTimeMs.toFixed(2)}ms`);
         device.queue.writeBuffer(cameraDataBuffer, 0, cameraData);
         renderPassDescriptor.colorAttachments[0].view = context.getCurrentTexture().createView();
         const encoder = device.createCommandEncoder({ label: "ray march render encoder" });
@@ -102,8 +133,24 @@ async function main() {
         pass.setBindGroup(0, cameraDataBindGroup);
         pass.draw(6);
         pass.end();
+        let queryResultBuffer;
+        if (supportsTimestampQuery) {
+            queryResultBuffer = device.createBuffer({
+                size: queryBuffer.size,
+                usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST
+            });
+            encoder.resolveQuerySet(querySet, 0, querySetCapacity, queryBuffer, 0);
+            encoder.copyBufferToBuffer(queryBuffer, 0, queryResultBuffer, 0, queryBuffer.size);
+        }
         device.queue.submit([encoder.finish()]);
+        if (supportsTimestampQuery) {
+            queryResultBuffer.mapAsync(GPUMapMode.READ).then(() => {
+                const times = new BigInt64Array(queryResultBuffer.getMappedRange());
+                gpuTimeMs = Number(BigInt(times[1]) - BigInt(times[0])) / 1000000;
+            });
+        }
         window.requestAnimationFrame(loop);
+        frameTimeMs = performance.now() - frameStart;
     };
     window.requestAnimationFrame(loop);
 }
